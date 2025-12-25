@@ -1,0 +1,21 @@
+# FastAPI и сервер
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+
+# Обработка изображений и HTTP
+Pillow==10.4.0
+requests==2.32.3
+opencv-python==4.10.0.84
+
+# Детекция объектов
+ultralytics==8.3.0
+
+# Синтез речи
+gtts==2.5.5
+
+# Для работы с файлами и временным хранением
+python-multipart==0.0.9
+
+# Опционально: если используется CUDA
+torch==2.5.0
+torchvision==0.20.0
