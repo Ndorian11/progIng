@@ -2,7 +2,7 @@
 import streamlit as st
 from ultralytics import YOLO
 from gtts import gTTS
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import requests
 from io import BytesIO
 import tempfile
@@ -191,9 +191,8 @@ if image and st.button("🔍 Анализировать", use_container_width=Tr
         # Отображаем исходное изображение
         st.image(image, caption="Исходное изображение", use_column_width=True)
         
-        # Отображаем результат детекции
-        annotated_img = results[0].plot()
-        st.image(annotated_img[:, :, ::-1], caption="Распознанные объекты", use_column_width=True)
+        # === УДАЛЕНО: results[0].plot() — потенциальный источник ошибки libGL.so.1 ===
+        # Вместо этого — просто выводим список объектов
         
         # Формируем текст и озвучиваем
         speech_text = format_text_from_objects(detected_names, lang='ru')
@@ -210,7 +209,7 @@ if image and st.button("🔍 Анализировать", use_container_width=Tr
         st.write(f"Всего объектов: {len(detected_names)}")
         if detected_names:
             counts = Counter(detected_names)
-            st.write("Распределение:")
+            st.write("Обнаружены:")
             for obj, cnt in counts.items():
                 st.write(f"- {translation_dict.get(obj, obj)}: {cnt}")
 
