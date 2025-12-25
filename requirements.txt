@@ -1,21 +1,11 @@
-# FastAPI и сервер
-fastapi==0.115.0
-uvicorn[standard]==0.32.0
-
-# Обработка изображений и HTTP
+streamlit==1.40.0
+ultralytics==8.3.0
+gtts==2.5.5
 Pillow==10.4.0
 requests==2.32.3
-opencv-python==4.10.0.84
+numpy==2.0.2
 
-# Детекция объектов
-ultralytics==8.3.0
-
-# Синтез речи
-gtts==2.5.5
-
-# Для работы с файлами и временным хранением
-python-multipart==0.0.9
-
-# Опционально: если используется CUDA
-torch==2.5.0
-torchvision==0.20.0
+# Явная установка PyTorch CPU-версии через официальный URL
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.0+cpu
+torchvision==0.20.0+cpu
