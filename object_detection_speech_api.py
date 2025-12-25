@@ -1,36 +1,26 @@
-# object_detection_speech_api.py
-
-from fastapi import FastAPI, File, UploadFile, HTTPException, Query
-from fastapi.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
-import torch
+# app.py
+import streamlit as st
 from ultralytics import YOLO
 from gtts import gTTS
 from PIL import Image
 import requests
 from io import BytesIO
-import os
 import tempfile
-import cv2
-import numpy as np
+import os
 from collections import Counter
-import shutil
 
-# ------------------------
-# Инициализация моделей
-# ------------------------
+# ----------------------------
+# Конфигурация страницы
+# ----------------------------
+st.set_page_config(
+    page_title="👁️ Распознавание объектов с озвучкой",
+    layout="centered",
+    initial_sidebar_state="collapsed"
+)
 
-print("🚀 Инициализация YOLOv8...")
-model_detection = YOLO('yolov8n.pt')
-print("✅ YOLOv8 готова")
-# gTTS не требует предварительной инициализации
-
-# ------------------------
+# ----------------------------
 # Словарь перевода
-# ------------------------
-
+# ----------------------------
 translation_dict = {
     'person': 'человек',
     'bicycle': 'велосипед',
@@ -114,39 +104,28 @@ translation_dict = {
     'toothbrush': 'зубная щётка'
 }
 
-# ------------------------
-# Вспомогательные функции
-# ------------------------
+# ----------------------------
+# Загрузка модели (кешируется)
+# ----------------------------
+@st.cache_resource
+def load_yolo_model():
+    return YOLO('yolov8n.pt')
 
-def load_image_from_url(url: str) -> Image.Image:
-    try:
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
-        return Image.open(BytesIO(resp.content)).convert('RGB')
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Ошибка загрузки изображения: {str(e)}")
+model = load_yolo_model()
 
-def load_image_from_bytes(data: bytes) -> Image.Image:
-    try:
-        return Image.open(BytesIO(data)).convert('RGB')
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Ошибка загрузки изображения: {str(e)}")
-
-def format_text_from_objects(objects: List[str], lang: str = 'ru') -> str:
+# ----------------------------
+# Функции
+# ----------------------------
+def format_text_from_objects(objects: list, lang: str = 'ru') -> str:
     if not objects:
         return "На изображении не обнаружено объектов."
-
+    
     counts = Counter(objects)
     items = []
-
     for obj, cnt in counts.items():
-        if lang == 'ru':
-            obj = translation_dict.get(obj, obj)
-        if cnt > 1:
-            items.append(f"{cnt} {obj}")
-        else:
-            items.append(obj)
-
+        obj_ru = translation_dict.get(obj, obj) if lang == 'ru' else obj
+        items.append(f"{cnt} {obj_ru}" if cnt > 1 else obj_ru)
+    
     if len(items) == 1:
         return f"На этом изображении {items[0]}."
     elif len(items) == 2:
@@ -154,111 +133,92 @@ def format_text_from_objects(objects: List[str], lang: str = 'ru') -> str:
     else:
         return f"На этом изображении " + ", ".join(items[:-1]) + f" и {items[-1]}."
 
-# ------------------------
-# FastAPI приложение
-# ------------------------
+def generate_speech(text: str, lang: str = 'ru') -> str:
+    tts = gTTS(text=text, lang=lang, slow=False)
+    audio_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3").name
+    tts.save(audio_file)
+    return audio_file
 
-app = FastAPI(
-    title="YOLOv8 + gTTS: Распознавание и озвучивание объектов",
-    description="API для детекции объектов на изображении и генерации речи на русском/английском языке",
-    version="1.0"
-)
+# ----------------------------
+# Интерфейс
+# ----------------------------
+st.title("👁️ Распознавание объектов с озвучкой")
+st.markdown("Загрузите изображение — система найдёт объекты и озвучит результат на русском языке.")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Выбор способа загрузки
+option = st.radio("Выберите способ загрузки:", ("По URL", "Загрузить файл"), horizontal=True)
 
-# Папка для временных аудиофайлов
-AUDIO_DIR = "audio_output"
-os.makedirs(AUDIO_DIR, exist_ok=True)
+image = None
 
-class DetectionResponse(BaseModel):
-    detected_objects: List[str]
-    object_counts: Dict[str, int]
-    speech_text: str
-    audio_url: str
-    total_objects: int
-    success: bool
+if option == "По URL":
+    url = st.text_input("Введите URL изображения", placeholder="https://example.com/image.jpg")
+    if url:
+        try:
+            response = requests.get(url, timeout=10)
+            image = Image.open(BytesIO(response.content)).convert("RGB")
+        except Exception as e:
+            st.error(f"Ошибка загрузки: {e}")
+elif option == "Загрузить файл":
+    uploaded_file = st.file_uploader("Выберите изображение", type=["jpg", "jpeg", "png"])
+    if uploaded_file:
+        image = Image.open(uploaded_file).convert("RGB")
 
-@app.post("/detect_and_speak", response_model=DetectionResponse)
-async def detect_and_speak_endpoint(
-    image_url: Optional[str] = None,
-    file: Optional[UploadFile] = File(None),
-    language: str = Query("ru", regex="^(ru|en)$"),
-    confidence: float = Query(0.4, ge=0.0, le=1.0)
-):
-    # Загрузка изображения
-    if image_url:
-        image_pil = load_image_from_url(image_url)
-        # Сохраняем временно для YOLO
+# Порог уверенности
+confidence = st.slider("Порог уверенности", 0.1, 1.0, 0.4, 0.05)
+
+# Кнопка анализа
+if image and st.button("🔍 Анализировать", use_container_width=True):
+    with st.spinner("Распознавание объектов..."):
+        # Сохраняем изображение во временный файл для YOLO
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-            image_pil.save(tmp.name)
-            image_path = tmp.name
-    elif file:
-        contents = await file.read()
-        image_pil = load_image_from_bytes(contents)
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-            image_pil.save(tmp.name)
-            image_path = tmp.name
-    else:
-        raise HTTPException(status_code=400, detail="Требуется image_url или файл")
-
-    try:
+            image.save(tmp.name)
+            temp_path = tmp.name
+        
         # Детекция
-        results = model_detection.predict(image_path, conf=confidence, verbose=False)
+        results = model.predict(temp_path, conf=confidence, verbose=False)
         boxes = results[0].boxes
-
+        
+        # Извлекаем названия
         detected_names = []
         for box in boxes:
             cls_id = int(box.cls[0])
             name = results[0].names[cls_id]
             detected_names.append(name)
+        
+        # Удаляем временный файл
+        os.unlink(temp_path)
+        
+        # Отображаем исходное изображение
+        st.image(image, caption="Исходное изображение", use_column_width=True)
+        
+        # Отображаем результат детекции
+        annotated_img = results[0].plot()
+        st.image(annotated_img[:, :, ::-1], caption="Распознанные объекты", use_column_width=True)
+        
+        # Формируем текст и озвучиваем
+        speech_text = format_text_from_objects(detected_names, lang='ru')
+        st.subheader("🎙️ Результат:")
+        st.write(speech_text)
+        
+        # Генерация и воспроизведение аудио
+        with st.spinner("Генерация речи..."):
+            audio_file = generate_speech(speech_text, lang='ru')
+            st.audio(audio_file, format="audio/mp3")
+        
+        # Статистика
+        st.subheader("📊 Статистика:")
+        st.write(f"Всего объектов: {len(detected_names)}")
+        if detected_names:
+            counts = Counter(detected_names)
+            st.write("Распределение:")
+            for obj, cnt in counts.items():
+                st.write(f"- {translation_dict.get(obj, obj)}: {cnt}")
 
-        # Формируем текст
-        speech_text = format_text_from_objects(detected_names, lang=language)
+elif not image and st.button("🔍 Анализировать", use_container_width=True):
+    st.warning("Пожалуйста, загрузите изображение.")
 
-        # Генерация аудио
-        tts = gTTS(text=speech_text, lang=language, slow=False)
-        audio_filename = f"{next(tempfile._get_candidate_names())}.mp3"
-        audio_path = os.path.join(AUDIO_DIR, audio_filename)
-        tts.save(audio_path)
-
-        # Подсчёт объектов
-        counts = dict(Counter(detected_names))
-
-        # Удаляем временный файл изображения
-        if os.path.exists(image_path):
-            os.unlink(image_path)
-
-        return DetectionResponse(
-            detected_objects=detected_names,
-            object_counts=counts,
-            speech_text=speech_text,
-            audio_url=f"/audio/{audio_filename}",
-            total_objects=len(detected_names),
-            success=True
-        )
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка обработки: {str(e)}")
-
-@app.get("/audio/{filename}")
-async def get_audio(filename: str):
-    file_path = os.path.join(AUDIO_DIR, filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Аудиофайл не найден")
-    return FileResponse(file_path, media_type="audio/mpeg", filename=filename)
-
-@app.get("/")
-def root():
-    return {
-        "message": "YOLOv8 + gTTS API запущен!",
-        "endpoints": {
-            "POST /detect_and_speak": "Детекция + озвучка",
-            "GET /audio/{filename}": "Скачать аудио"
-        }
-    }
+# ----------------------------
+# Подвал
+# ----------------------------
+st.markdown("---")
+st.caption("Используется YOLOv8 + gTTS • Все вычисления выполняются на сервере")
