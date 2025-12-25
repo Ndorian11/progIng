@@ -1,18 +1,17 @@
-# Streamlit и зависимости
+# Интерфейс
 streamlit==1.40.0
 
-# Ultralytics YOLOv8 (поддерживает Python 3.8–3.11)
-ultralytics==8.2.0
+# YOLOv8 — используем последнюю версию, совместимую с Python 3.12
+ultralytics==8.3.0
 
-# gTTS — последняя реальная версия на PyPI
+# gTTS — последняя реальная версия
 gtts==2.5.4
 
 # Обработка изображений
 Pillow==10.4.0
 requests==2.32.3
-numpy==1.26.4
+numpy==2.1.0  # numpy 2.x поддерживает Python 3.12
 
-# PyTorch CPU — для YOLOv8
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.4.0+cpu
-torchvision==0.19.0+cpu
+# PyTorch — используем **последнюю доступную версию без +cpu** (pip сам выберет CPU-сборку)
+torch>=2.5.0
+torchvision>=0.20.0
